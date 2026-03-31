@@ -48,6 +48,44 @@ def _run_client(args: argparse.Namespace):
     app.run()
 
 
+def _run_request(args: argparse.Namespace):
+    """Send a test request and print the response."""
+    messages = []
+    if args.system:
+        messages.append({"role": "system", "content": args.system})
+    messages.append({"role": "user", "content": args.prompt})
+
+    body = json.dumps({
+        "model": args.model,
+        "messages": messages,
+        "stream": args.stream,
+    }).encode()
+
+    url = f"http://{args.host}:{args.port}/v1/chat/completions"
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+
+    print(f"Sending to {args.host}:{args.port}... (waiting for human response)")
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            if args.stream:
+                for line in resp:
+                    line = line.decode().strip()
+                    if line.startswith("data: ") and line != "data: [DONE]":
+                        chunk = json.loads(line[6:])
+                        content = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if content:
+                            print(content, end="", flush=True)
+                    elif line == "data: [DONE]":
+                        print()
+            else:
+                data = json.loads(resp.read().decode())
+                print(data["choices"][0]["message"]["content"])
+    except urllib.error.URLError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        print("Is the deckard server running? Try: deckard serve", file=sys.stderr)
+        sys.exit(1)
+
+
 def _run_combined(args: argparse.Namespace):
     if not _check_server(args.host, args.port):
         print(f"Starting deckard server on {args.host}:{args.port}...")
@@ -72,12 +110,23 @@ def main():
     client_parser = subparsers.add_parser("client", help="Connect TUI to running server")
     client_parser.add_argument("--host", default="127.0.0.1")
     client_parser.add_argument("--port", type=int, default=8421)
+
+    req_parser = subparsers.add_parser("request", help="Send a test request (blocks until response)")
+    req_parser.add_argument("prompt", help="The user message to send")
+    req_parser.add_argument("--host", default="127.0.0.1")
+    req_parser.add_argument("--port", type=int, default=8421)
+    req_parser.add_argument("--model", default="deckard")
+    req_parser.add_argument("--system", default=None, help="Optional system prompt")
+    req_parser.add_argument("--stream", action="store_true", help="Request streaming response")
+
     args = parser.parse_args()
 
     if args.command == "serve":
         _run_serve(args)
     elif args.command == "client":
         _run_client(args)
+    elif args.command == "request":
+        _run_request(args)
     else:
         _run_combined(args)
 
