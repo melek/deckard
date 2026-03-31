@@ -278,6 +278,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/_deckard/queue/") and self.path.endswith("/respond"):
             req_id = self.path[len("/_deckard/queue/"):-len("/respond")]
             self._handle_respond(req_id)
+        elif self.path == "/_deckard/shutdown":
+            self._handle_shutdown()
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -492,6 +494,11 @@ class _Handler(BaseHTTPRequestHandler):
                 pass  # DB closed during shutdown
 
     # ---- internal TUI endpoints ----
+
+    def _handle_shutdown(self) -> None:
+        srv: DeckardServer = self.server  # type: ignore[assignment]
+        self._send_json(200, {"status": "shutting down"})
+        threading.Thread(target=srv.shutdown, daemon=True).start()
 
     def _handle_queue_list(self) -> None:
         srv: DeckardServer = self.server  # type: ignore[assignment]

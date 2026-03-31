@@ -93,13 +93,38 @@ def _run_request(args: argparse.Namespace):
         sys.exit(1)
 
 
+def _run_stop(args: argparse.Namespace):
+    """Send shutdown signal to a running server."""
+    url = f"http://{args.host}:{args.port}/_deckard/shutdown"
+    try:
+        req = urllib.request.Request(url, data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            json.loads(resp.read().decode())
+        print(f"Server at {args.host}:{args.port} shutting down.")
+    except Exception:
+        print(f"No server found at {args.host}:{args.port}.", file=sys.stderr)
+        sys.exit(1)
+
+
 def _run_combined(args: argparse.Namespace):
+    started_server = False
     if not _check_server(args.host, args.port):
         print(f"Starting deckard server on {args.host}:{args.port}...")
         if not _start_server_background(args):
             print("Failed to start server.", file=sys.stderr)
             sys.exit(1)
+        started_server = True
+
     _run_client(args)
+
+    # After TUI exits
+    if started_server:
+        print(f"Server still running at {args.host}:{args.port}.")
+        print(f"  Stop it:  deckard stop")
+        print(f"  Reattach: deckard client")
+    else:
+        print(f"Server at {args.host}:{args.port} was already running (not started by this session).")
 
 
 def main():
@@ -118,6 +143,10 @@ def main():
     client_parser.add_argument("--host", default="127.0.0.1")
     client_parser.add_argument("--port", type=int, default=8421)
 
+    stop_parser = subparsers.add_parser("stop", help="Shut down a running server")
+    stop_parser.add_argument("--host", default="127.0.0.1")
+    stop_parser.add_argument("--port", type=int, default=8421)
+
     req_parser = subparsers.add_parser("request", help="Send a test request (blocks until response)")
     req_parser.add_argument("prompt", help="The user message to send")
     req_parser.add_argument("--host", default="127.0.0.1")
@@ -132,6 +161,8 @@ def main():
         _run_serve(args)
     elif args.command == "client":
         _run_client(args)
+    elif args.command == "stop":
+        _run_stop(args)
     elif args.command == "request":
         _run_request(args)
     else:
