@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deckard"
+version = "0.1.0"
+description = "Human-as-LLM endpoint — OpenAI-compatible API server with TUI"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["textual>=1.0"]
+
+[project.scripts]
+deckard = "deckard.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
