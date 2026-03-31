@@ -7,13 +7,13 @@ Point any client at `localhost:8421` instead of an inference server. The client 
 ## Install
 
 ```bash
-uv tool install /path/to/deckard
+uv tool install git+https://github.com/melek/deckard
 ```
 
-Or for development:
+Or from a local clone:
 
 ```bash
-uv pip install -e /path/to/deckard
+uv tool install -e /path/to/deckard
 ```
 
 ## Usage
@@ -38,6 +38,29 @@ deckard client
 --port N              Server port (default: 8421)
 --simulate-latency    30ms/chunk streaming delay (default: 2ms)
 ```
+
+## Pointing Other Tools at Deckard
+
+Start deckard, then set the base URL in your tool of choice:
+
+```bash
+# Python openai library
+export OPENAI_BASE_URL=http://localhost:8421/v1
+python -c "from openai import OpenAI; print(OpenAI().chat.completions.create(model='deckard', messages=[{'role':'user','content':'hello'}]).choices[0].message.content)"
+
+# Claude Code
+claude --provider openai-compatible --endpoint http://localhost:8421/v1
+
+# curl
+curl http://localhost:8421/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deckard","messages":[{"role":"user","content":"hello"}]}'
+
+# Any OpenAI-compatible client
+# Just set the base URL to http://localhost:8421/v1
+```
+
+Each request appears in the deckard TUI. You read the full prompt (system messages, conversation history, everything) and type your response.
 
 ## What It's For
 
