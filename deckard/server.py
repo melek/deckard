@@ -15,6 +15,15 @@ from typing import Any
 
 from deckard.types import Status, QueuedRequest, DeckardConfig
 
+# Maximum request body size (10 MB)
+MAX_BODY_SIZE = 10 * 1024 * 1024
+
+# Maximum queue depth — reject with 429 if exceeded
+MAX_QUEUE_DEPTH = 100
+
+# Default timeout for waiting on human response (seconds)
+DEFAULT_WAIT_TIMEOUT = 600
+
 
 # ---------------------------------------------------------------------------
 # Conversation ID
@@ -73,26 +82,28 @@ def _init_db(path: str) -> sqlite3.Connection:
     return conn
 
 
-def _insert_request(conn: sqlite3.Connection, req: QueuedRequest, conv_id: str) -> None:
-    conn.execute(
-        "INSERT INTO requests (id, created_at, model, messages, stream, status, "
-        "estimated_prompt_tokens, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            req.id,
-            req.created_at,
-            req.model,
-            json.dumps(req.messages),
-            1 if req.stream else 0,
-            req.status.value,
-            estimate_prompt_tokens(req.messages),
-            conv_id,
-        ),
-    )
-    conn.commit()
+def _insert_request(conn: sqlite3.Connection, db_lock: threading.Lock, req: QueuedRequest, conv_id: str) -> None:
+    with db_lock:
+        conn.execute(
+            "INSERT INTO requests (id, created_at, model, messages, stream, status, "
+            "estimated_prompt_tokens, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                req.id,
+                req.created_at,
+                req.model,
+                json.dumps(req.messages),
+                1 if req.stream else 0,
+                req.status.value,
+                estimate_prompt_tokens(req.messages),
+                conv_id,
+            ),
+        )
+        conn.commit()
 
 
 def _complete_request(
     conn: sqlite3.Connection,
+    db_lock: threading.Lock,
     req_id: str,
     response: str,
     responded_at: str,
@@ -100,21 +111,38 @@ def _complete_request(
     reading_ms: int | None,
     composing_ms: int | None,
 ) -> None:
-    conn.execute(
-        "UPDATE requests SET status=?, response=?, responded_at=?, duration_ms=?, "
-        "reading_ms=?, composing_ms=?, estimated_completion_tokens=? WHERE id=?",
-        (
-            Status.COMPLETED.value,
-            response,
-            responded_at,
-            duration_ms,
-            reading_ms,
-            composing_ms,
-            estimate_completion_tokens(response),
-            req_id,
-        ),
-    )
-    conn.commit()
+    with db_lock:
+        conn.execute(
+            "UPDATE requests SET status=?, response=?, responded_at=?, duration_ms=?, "
+            "reading_ms=?, composing_ms=?, estimated_completion_tokens=? WHERE id=?",
+            (
+                Status.COMPLETED.value,
+                response,
+                responded_at,
+                duration_ms,
+                reading_ms,
+                composing_ms,
+                estimate_completion_tokens(response),
+                req_id,
+            ),
+        )
+        conn.commit()
+
+
+def _fail_request(
+    conn: sqlite3.Connection,
+    db_lock: threading.Lock,
+    req_id: str,
+    response: str | None,
+    responded_at: str | None,
+) -> None:
+    """Mark a request as abandoned after delivery failure. Preserves the response text."""
+    with db_lock:
+        conn.execute(
+            "UPDATE requests SET status=?, response=?, responded_at=? WHERE id=?",
+            (Status.ABANDONED.value, response, responded_at, req_id),
+        )
+        conn.commit()
 
 
 def _abandon_pending(conn: sqlite3.Connection) -> None:
@@ -288,13 +316,24 @@ class _Handler(BaseHTTPRequestHandler):
             status=Status.PENDING,
         )
 
+        # I1: reject if queue is full
+        if srv.queue.pending_count() >= MAX_QUEUE_DEPTH:
+            self._send_json(429, {"error": "queue full", "max": MAX_QUEUE_DEPTH})
+            return
+
         conv_id = conversation_id(messages)
-        _insert_request(srv.db, req, conv_id)
+        _insert_request(srv.db, srv.db_lock, req, conv_id)
 
         entry = srv.queue.add(req)
 
-        # Block until human responds or server shuts down
-        entry.event.wait()
+        # I2: block with timeout so threads don't hang forever
+        entry.event.wait(timeout=DEFAULT_WAIT_TIMEOUT)
+
+        if not entry.event.is_set():
+            # Timeout — no response from human
+            srv.queue.remove(req_id)
+            self._send_json(504, {"error": "timeout waiting for human response"})
+            return
 
         if entry.abandoned:
             self._send_json(503, {"error": "server shutting down"})
@@ -426,6 +465,7 @@ class _Handler(BaseHTTPRequestHandler):
         if entry and entry.request.responded_at:
             _complete_request(
                 srv.db,
+                srv.db_lock,
                 req_id,
                 entry.request.response or "",
                 entry.request.responded_at,
@@ -437,17 +477,10 @@ class _Handler(BaseHTTPRequestHandler):
     def _mark_delivery_failed(self, srv: "DeckardServer", req_id: str) -> None:
         entry = srv.queue.get(req_id)
         if entry:
-            # Preserve the response but don't mark as completed
-            srv.db.execute(
-                "UPDATE requests SET status=?, response=?, responded_at=? WHERE id=?",
-                (
-                    Status.ABANDONED.value,
-                    entry.request.response,
-                    entry.request.responded_at,
-                    req_id,
-                ),
+            _fail_request(
+                srv.db, srv.db_lock, req_id,
+                entry.request.response, entry.request.responded_at,
             )
-            srv.db.commit()
 
     # ---- internal TUI endpoints ----
 
@@ -466,37 +499,34 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing 'response' field"})
             return
 
-        entry = srv.queue.get(req_id)
-        if entry is None:
-            self._send_json(404, {"error": "request not found"})
-            return
+        # Atomic check-and-respond under queue lock (fixes C1 TOCTOU race)
+        with srv.queue._lock:
+            entry = srv.queue._entries.get(req_id)
+            if entry is None:
+                self._send_json(404, {"error": "request not found"})
+                return
 
-        if entry.event.is_set():
-            self._send_json(409, {"error": "already responded"})
-            return
+            if entry.event.is_set():
+                self._send_json(409, {"error": "already responded"})
+                return
 
-        response_text = body["response"]
-        reading_ms = body.get("reading_ms")
-        composing_ms = body.get("composing_ms")
-        responded_at = datetime.now(timezone.utc).isoformat()
+            response_text = body["response"]
+            reading_ms = body.get("reading_ms")
+            composing_ms = body.get("composing_ms")
+            responded_at = datetime.now(timezone.utc).isoformat()
 
-        # Calculate duration from creation to response
-        created = datetime.fromisoformat(entry.request.created_at)
-        now = datetime.now(timezone.utc)
-        duration_ms = int((now - created).total_seconds() * 1000)
+            created = datetime.fromisoformat(entry.request.created_at)
+            now = datetime.now(timezone.utc)
+            duration_ms = int((now - created).total_seconds() * 1000)
 
-        # Update the request object
-        entry.request.response = response_text
-        entry.request.responded_at = responded_at
-        entry.request.status = Status.COMPLETED
+            entry.request.response = response_text
+            entry.request.responded_at = responded_at
+            entry.request.status = Status.COMPLETED
+            entry.duration_ms = duration_ms
+            entry.reading_ms = reading_ms
+            entry.composing_ms = composing_ms
 
-        # Stash timing on the entry for _mark_delivered
-        entry.duration_ms = duration_ms
-        entry.reading_ms = reading_ms
-        entry.composing_ms = composing_ms
-
-        # Unblock the waiting HTTP handler
-        entry.event.set()
+            entry.event.set()
 
         self._send_json(200, {"status": "ok", "id": req_id})
 
@@ -506,6 +536,9 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             self._send_json(400, {"error": "empty body"})
+            return None
+        if length > MAX_BODY_SIZE:
+            self._send_json(413, {"error": "payload too large", "max_bytes": MAX_BODY_SIZE})
             return None
         raw = self.rfile.read(length)
         try:
@@ -550,6 +583,7 @@ class DeckardServer(_ThreadedHTTPServer):
         )
         resolved_db = os.path.expanduser(db_path)
         self.db = _init_db(resolved_db)
+        self.db_lock = threading.Lock()
         self.queue = RequestQueue()
 
         # Recover abandoned requests from previous run

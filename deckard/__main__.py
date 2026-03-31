@@ -39,7 +39,12 @@ def _run_serve(args: argparse.Namespace):
         port=args.port,
         chunk_delay_ms=30 if args.simulate_latency else 2,
     )
-    srv.serve()
+    try:
+        srv.serve()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.shutdown()
 
 
 def _run_client(args: argparse.Namespace):
