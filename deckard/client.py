@@ -181,10 +181,10 @@ class DeckardClient(App):
         pending = sum(1 for i in items if i.get("status") == "pending")
         status_bar.set_counts(pending, len(items))
 
-        # Skip rebuild if queue hasn't changed
+        # Skip rebuild if queue hasn't changed (but always build on first poll)
         old_ids = [i.get("id") for i in self._queue_items]
         new_ids = [i.get("id") for i in items]
-        if old_ids == new_ids:
+        if old_ids == new_ids and list_view.children:
             self._queue_items = items
             return
 
