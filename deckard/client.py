@@ -18,7 +18,7 @@ from datetime import datetime
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import ListView, ListItem, Label, RichLog, Static, TextArea
+from textual.widgets import Footer, ListView, ListItem, Label, RichLog, Static, TextArea
 
 
 # ---------------------------------------------------------------------------
@@ -62,11 +62,12 @@ def _last_user_message(messages: list[dict]) -> str:
 class StatusBar(Static):
     """Top bar: connection dot, pending count, total count."""
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, server_addr: str = "", **kwargs) -> None:
         super().__init__(**kwargs)
         self.connected = False
         self.pending = 0
         self.total = 0
+        self.server_addr = server_addr
         self._render_content()
 
     def _render_content(self) -> None:
@@ -75,7 +76,7 @@ class StatusBar(Static):
         else:
             dot = "[red]\u25cf[/red] disconnected"
         self.update(
-            f" deckard  {dot}  \u2500  {self.pending} pending  \u2500  {self.total} total"
+            f" deckard  {dot}  \u2500  {self.pending} pending  \u2500  {self.total} total  \u2500  {self.server_addr}"
         )
 
     def set_connected(self, connected: bool) -> None:
@@ -123,6 +124,8 @@ class DeckardClient(App):
         port: int = 8421,
     ) -> None:
         super().__init__()
+        self.host = host
+        self.port = port
         self.base_url = f"http://{host}:{port}"
 
         # Queue state
@@ -136,12 +139,13 @@ class DeckardClient(App):
         self._last_keystroke: float | None = None
 
     def compose(self) -> ComposeResult:
-        yield StatusBar(id="status-bar")
+        yield StatusBar(server_addr=f"{self.host}:{self.port}", id="status-bar")
         yield ListView(id="request-list")
         yield RequestDetail(
             highlight=True, markup=True, wrap=True, id="request-detail"
         )
         yield ResponseInput(id="response-input")
+        yield Footer()
 
     def on_mount(self) -> None:
         # Hide detail and input on mount
@@ -179,20 +183,25 @@ class DeckardClient(App):
         old_index = list_view.index
 
         list_view.clear()
-        for idx, item in enumerate(items):
-            ts = _format_time(item.get("created_at", ""))
-            model = _truncate(item.get("model", ""), 8)
-            last_msg = _last_user_message(item.get("messages", []))
-            preview = _truncate(last_msg, 40)
-            abandoned = item.get("abandoned", False)
-
-            prefix = "\u21bb " if abandoned else ""
-            note = "  [dim](no client waiting)[/dim]" if abandoned else ""
-            label_text = (
-                f"[dim][{idx + 1}][/dim] {ts}  {model:8s}  "
-                f'{prefix}"{preview}"{note}'
+        if not items:
+            list_view.append(
+                ListItem(Label("[dim]Waiting for requests... Point a client at this server.[/dim]", markup=True))
             )
-            list_view.append(ListItem(Label(label_text, markup=True)))
+        else:
+            for idx, item in enumerate(items):
+                ts = _format_time(item.get("created_at", ""))
+                model = _truncate(item.get("model", ""), 8)
+                last_msg = _last_user_message(item.get("messages", []))
+                preview = _truncate(last_msg, 40)
+                abandoned = item.get("abandoned", False)
+
+                prefix = "\u21bb " if abandoned else ""
+                note = "  [dim](no client waiting)[/dim]" if abandoned else ""
+                label_text = (
+                    f"[dim][{idx + 1}][/dim] {ts}  {model:8s}  "
+                    f'{prefix}"{preview}"{note}'
+                )
+                list_view.append(ListItem(Label(label_text, markup=True)))
 
         # Restore selection if valid
         if old_index is not None and 0 <= old_index < len(items):
