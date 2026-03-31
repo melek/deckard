@@ -221,10 +221,13 @@ class RequestQueue:
             return sum(1 for e in self._entries.values() if not e.event.is_set())
 
     def snapshot(self) -> list[dict]:
+        """Return only pending and abandoned requests (CA-3.2: no completed items)."""
         with self._lock:
             items = []
             for e in self._entries.values():
                 r = e.request
+                if r.status not in (Status.PENDING, Status.ABANDONED):
+                    continue
                 items.append({
                     "id": r.id,
                     "created_at": r.created_at,
@@ -269,6 +272,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_models()
         elif self.path == "/_deckard/queue":
             self._handle_queue_list()
+        elif self.path.startswith("/_deckard/queue/") and self.path.endswith("/status"):
+            req_id = self.path[len("/_deckard/queue/"):-len("/status")]
+            self._handle_queue_status(req_id)
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -500,6 +506,19 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json(200, {"status": "shutting down"})
         threading.Thread(target=srv.shutdown, daemon=True).start()
 
+    def _handle_queue_status(self, req_id: str) -> None:
+        """Return delivery status for a specific request."""
+        srv: DeckardServer = self.server  # type: ignore[assignment]
+        with srv.db_lock:
+            cursor = srv.db.execute(
+                "SELECT status, response FROM requests WHERE id = ?", (req_id,)
+            )
+            row = cursor.fetchone()
+        if row is None:
+            self._send_json(404, {"error": "request not found"})
+        else:
+            self._send_json(200, {"id": req_id, "status": row[0], "has_response": row[1] is not None})
+
     def _handle_queue_list(self) -> None:
         srv: DeckardServer = self.server  # type: ignore[assignment]
         self._send_json(200, srv.queue.snapshot())
@@ -550,7 +569,12 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _read_body(self) -> dict | None:
         # Note: requires Content-Length header. Chunked transfer encoding is not supported.
-        length = int(self.headers.get("Content-Length", 0))
+        raw_length = self.headers.get("Content-Length", "0")
+        try:
+            length = int(raw_length)
+        except (ValueError, TypeError):
+            self._send_json(400, {"error": f"invalid Content-Length: {raw_length!r}"})
+            return None
         if length == 0:
             self._send_json(400, {"error": "empty body"})
             return None
@@ -601,6 +625,8 @@ class DeckardServer(_ThreadedHTTPServer):
         resolved_db = os.path.expanduser(db_path)
         self.db = _init_db(resolved_db)
         self.db_lock = threading.Lock()
+        self._shutdown_lock = threading.Lock()
+        self._shutdown_called = False
         self.queue = RequestQueue()
 
         # Recover abandoned requests from previous run
@@ -623,9 +649,10 @@ class DeckardServer(_ThreadedHTTPServer):
 
     def shutdown(self) -> None:
         """Graceful shutdown: abandon pending, close DB, stop serving. Idempotent."""
-        if getattr(self, "_shutdown_called", False):
-            return
-        self._shutdown_called = True
+        with self._shutdown_lock:
+            if self._shutdown_called:
+                return
+            self._shutdown_called = True
 
         # Unblock any waiting handlers
         abandoned = self.queue.abandon_all()

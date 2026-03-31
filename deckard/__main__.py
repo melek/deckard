@@ -39,11 +39,17 @@ def _run_start(args: argparse.Namespace):
         print(f"Server already running at {args.host}:{args.port}.", file=sys.stderr)
         sys.exit(1)
     from deckard.server import DeckardServer
-    srv = DeckardServer(
-        host=args.host,
-        port=args.port,
-        chunk_delay_ms=30 if args.simulate_latency else 2,
-    )
+    try:
+        srv = DeckardServer(
+            host=args.host,
+            port=args.port,
+            chunk_delay_ms=30 if args.simulate_latency else 2,
+        )
+    except OSError as e:
+        print(f"Cannot start server: {e}", file=sys.stderr)
+        if "Address already in use" in str(e):
+            print(f"Port {args.port} is in use. Try: deckard stop", file=sys.stderr)
+        sys.exit(1)
     try:
         srv.serve()
     except KeyboardInterrupt:

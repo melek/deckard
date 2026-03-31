@@ -185,9 +185,9 @@ class DeckardClient(App):
         status_bar.set_counts(pending, len(items))
 
         # Skip rebuild if queue hasn't changed (but always build on first poll)
-        old_ids = [i.get("id") for i in self._queue_items]
-        new_ids = [i.get("id") for i in items]
-        if old_ids == new_ids and list_view.children:
+        old_keys = [(i.get("id"), i.get("status")) for i in self._queue_items]
+        new_keys = [(i.get("id"), i.get("status")) for i in items]
+        if old_keys == new_keys and list_view.children:
             self._queue_items = items
             return
 
@@ -215,7 +215,9 @@ class DeckardClient(App):
                     f"[dim][{idx + 1}][/dim] {ts}  {model:8s}  "
                     f'{prefix}"{preview}"{note}'
                 )
-                list_view.append(ListItem(Label(label_text, markup=True)))
+                li = ListItem(Label(label_text, markup=True))
+                li.deckard_request_id = item.get("id")
+                list_view.append(li)
 
         # Restore selection if valid
         if old_index is not None and 0 <= old_index < len(items):
@@ -229,11 +231,14 @@ class DeckardClient(App):
         if self._selected_id is not None:
             return
 
-        idx = event.list_view.index
-        if idx is None or idx >= len(self._queue_items):
+        # Look up by ID stored on the ListItem, not by index (CA-3.1)
+        req_id = getattr(event.item, "deckard_request_id", None)
+        if req_id is None:
+            return
+        item = next((r for r in self._queue_items if r.get("id") == req_id), None)
+        if item is None:
             return
 
-        item = self._queue_items[idx]
         self._selected_id = item["id"]
 
         # Show detail
@@ -347,7 +352,20 @@ class DeckardClient(App):
             with urllib.request.urlopen(req, timeout=10) as resp:
                 json.loads(resp.read().decode())
 
-            # Success — hide detail/input and go back to list
+            # Check delivery status after a brief delay (CA-4.4)
+            time.sleep(0.5)
+            try:
+                status_req = urllib.request.Request(
+                    f"{self.base_url}/_deckard/queue/{req_id}/status"
+                )
+                with urllib.request.urlopen(status_req, timeout=5) as status_resp:
+                    status_data = json.loads(status_resp.read().decode())
+                if status_data.get("status") == "abandoned" and status_data.get("has_response"):
+                    self.call_from_thread(self._show_delivery_warning)
+                    return
+            except Exception:
+                pass  # status check failed — proceed optimistically
+
             self.call_from_thread(self._after_submit_success)
 
         except urllib.error.HTTPError as e:
@@ -362,6 +380,14 @@ class DeckardClient(App):
         except Exception as e:
             detail = self.query_one("#request-detail", RequestDetail)
             self.call_from_thread(detail.write, f"[red]Error: {e}[/red]")
+
+    def _show_delivery_warning(self) -> None:
+        """Warn the human that their response was accepted but delivery to client failed."""
+        detail = self.query_one("#request-detail", RequestDetail)
+        detail.write("")
+        detail.write("[yellow]Warning: Your response was saved but the client may not have received it.[/yellow]")
+        detail.write("[yellow]The response is preserved in the database.[/yellow]")
+        # Don't clear — let the human see the warning and press Esc when ready
 
     def _after_submit_success(self) -> None:
         """Clean up UI after successful submit."""
