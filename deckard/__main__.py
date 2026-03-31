@@ -23,11 +23,13 @@ def _start_server_background(args: argparse.Namespace) -> bool:
     cmd = [sys.executable, "-m", "deckard", "serve", "--port", str(args.port)]
     if args.simulate_latency:
         cmd.append("--simulate-latency")
-    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     for _ in range(50):
         if _check_server(args.host, args.port):
             return True
         time.sleep(0.1)
+    # Server didn't come up — clean up the subprocess
+    proc.terminate()
     return False
 
 

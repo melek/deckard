@@ -301,6 +301,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         messages = body.get("messages", [])
+        if not messages:
+            self._send_json(400, {"error": "messages array is empty"})
+            return
         stream = body.get("stream", False)
         model = body.get("model", "deckard")
 
@@ -412,10 +415,10 @@ class _Handler(BaseHTTPRequestHandler):
             })
             time.sleep(chunk_delay)
 
-            # Content chunks: one per word
-            words = text.split()
-            for i, word in enumerate(words):
-                content = word + " " if i < len(words) - 1 else word
+            # Content chunks: fixed-size character chunks to preserve whitespace/formatting
+            chunk_size = 8  # ~2 tokens per chunk
+            chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+            for content in chunks:
                 _sse_chunk({
                     "id": f"chatcmpl-{req_id}",
                     "object": "chat.completion.chunk",
@@ -533,6 +536,7 @@ class _Handler(BaseHTTPRequestHandler):
     # ---- helpers ----
 
     def _read_body(self) -> dict | None:
+        # Note: requires Content-Length header. Chunked transfer encoding is not supported.
         length = int(self.headers.get("Content-Length", 0))
         if length == 0:
             self._send_json(400, {"error": "empty body"})

@@ -167,7 +167,10 @@ class DeckardClient(App):
                 data = json.loads(resp.read().decode())
             self.call_from_thread(self._update_queue, data)
             self.call_from_thread(status_bar.set_connected, True)
-        except Exception:
+        except (urllib.error.URLError, OSError, ConnectionError):
+            self.call_from_thread(status_bar.set_connected, False)
+        except Exception as e:
+            logger.debug("poll error: %s", e)
             self.call_from_thread(status_bar.set_connected, False)
 
     def _update_queue(self, items: list[dict]) -> None:
