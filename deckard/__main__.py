@@ -20,7 +20,7 @@ def _check_server(host: str, port: int) -> bool:
 
 
 def _start_server_background(args: argparse.Namespace) -> bool:
-    cmd = [sys.executable, "-m", "deckard", "serve", "--port", str(args.port)]
+    cmd = [sys.executable, "-m", "deckard", "start", "--port", str(args.port)]
     if args.simulate_latency:
         cmd.append("--simulate-latency")
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -33,7 +33,7 @@ def _start_server_background(args: argparse.Namespace) -> bool:
     return False
 
 
-def _run_serve(args: argparse.Namespace):
+def _run_start(args: argparse.Namespace):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
     from deckard.server import DeckardServer
     srv = DeckardServer(
@@ -134,10 +134,10 @@ def main():
     parser.add_argument("--simulate-latency", action="store_true")
     subparsers = parser.add_subparsers(dest="command")
 
-    serve_parser = subparsers.add_parser("serve", help="Run headless server")
-    serve_parser.add_argument("--host", default="127.0.0.1")
-    serve_parser.add_argument("--port", type=int, default=8421)
-    serve_parser.add_argument("--simulate-latency", action="store_true")
+    start_parser = subparsers.add_parser("start", help="Run headless server")
+    start_parser.add_argument("--host", default="127.0.0.1")
+    start_parser.add_argument("--port", type=int, default=8421)
+    start_parser.add_argument("--simulate-latency", action="store_true")
 
     client_parser = subparsers.add_parser("client", help="Connect TUI to running server")
     client_parser.add_argument("--host", default="127.0.0.1")
@@ -157,8 +157,8 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "serve":
-        _run_serve(args)
+    if args.command == "start":
+        _run_start(args)
     elif args.command == "client":
         _run_client(args)
     elif args.command == "stop":

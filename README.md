@@ -25,8 +25,8 @@ deckard
 # Send a test request from another terminal
 deckard request "What is the capital of France?"
 
-# Headless server only
-deckard serve
+# Start headless server only
+deckard start
 
 # Connect TUI to a running server
 deckard client

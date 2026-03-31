@@ -11,7 +11,7 @@ Deckard is a human-as-LLM endpoint. It's an OpenAI-compatible HTTP server where 
 python3 -m deckard
 
 # Run server only (headless, logs to stdout)
-python3 -m deckard serve
+python3 -m deckard start
 
 # Connect TUI to running server
 python3 -m deckard client
