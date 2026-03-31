@@ -4,7 +4,7 @@
 
 **Goal:** Build a human-as-LLM endpoint — an OpenAI-compatible HTTP server with a Textual TUI where a human reads prompts and types responses.
 
-**Architecture:** Four modules (types → server → client → CLI entry), built bottom-up. Server uses stdlib `http.server` with `ThreadingHTTPServer`. Client uses Textual. Communication via HTTP (same pattern as UIDI REPL ↔ daemon). SQLite for durable logging.
+**Architecture:** Four modules (types → server → client → CLI entry), built bottom-up. Server uses stdlib `http.server` with `ThreadingHTTPServer`. Client uses Textual. Communication via HTTP (server and client are decoupled processes). SQLite for durable logging.
 
 **Tech Stack:** Python 3.10+, Textual (TUI), SQLite (logging), stdlib `http.server` + `threading` + `json` + `uuid` + `hashlib`.
 

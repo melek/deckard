@@ -24,8 +24,7 @@ python3 -m deckard --simulate-latency       # 30ms/chunk streaming (default: 2ms
 ## Testing
 
 ```bash
-# Run all tests (use UIDI's venv until deckard has its own)
-/home/melek/workshop/uidi/.venv/bin/python3 -m pytest tests/ -v
+python3 -m pytest tests/ -v
 ```
 
 ## Architecture

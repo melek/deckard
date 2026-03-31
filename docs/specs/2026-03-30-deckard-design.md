@@ -24,7 +24,7 @@ Four modules:
 The server is always headless. The client is always a separate connection to the server. `deckard` (no subcommand) starts the server if needed and opens the client.
 
 ```
-Any OpenAI-compatible client (UIDI, curl, openai-python)
+Any OpenAI-compatible client (curl, openai-python, etc.)
     |
     |  POST /v1/chat/completions
     v
@@ -213,7 +213,7 @@ On startup, the TUI checks for requests with status `abandoned`. These appear at
 
 ### Polling
 
-TUI polls `GET /_deckard/queue` every 2 seconds for new requests. StatusBar updates pending count. Same `@work(thread=True)` pattern as UIDI REPL.
+TUI polls `GET /_deckard/queue` every 2 seconds for new requests. StatusBar updates pending count. Uses Textual's `@work(thread=True)` pattern for non-blocking HTTP.
 
 ---
 
