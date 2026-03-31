@@ -175,9 +175,17 @@ class DeckardClient(App):
         status_bar = self.query_one("#status-bar", StatusBar)
         list_view = self.query_one("#request-list", ListView)
 
-        self._queue_items = items
         pending = sum(1 for i in items if i.get("status") == "pending")
         status_bar.set_counts(pending, len(items))
+
+        # Skip rebuild if queue hasn't changed
+        old_ids = [i.get("id") for i in self._queue_items]
+        new_ids = [i.get("id") for i in items]
+        if old_ids == new_ids:
+            self._queue_items = items
+            return
+
+        self._queue_items = items
 
         # Preserve selection
         old_index = list_view.index
