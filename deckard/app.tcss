@@ -1,0 +1,41 @@
+Screen {
+    layout: vertical;
+}
+
+#status-bar {
+    dock: top;
+    height: 1;
+    background: $surface-lighten-1;
+    color: $text;
+    padding: 0 1;
+}
+
+#request-list {
+    height: 1fr;
+    min-height: 4;
+    border-bottom: solid $surface-lighten-2;
+    padding: 0 1;
+}
+
+#request-detail {
+    height: 2fr;
+    border-bottom: solid $surface-lighten-2;
+    padding: 0 1;
+    overflow-y: auto;
+}
+
+#response-input {
+    height: auto;
+    min-height: 3;
+    max-height: 10;
+    padding: 0 1;
+}
+
+TextArea {
+    border: none;
+    background: $surface;
+}
+
+TextArea:focus {
+    border: none;
+}
