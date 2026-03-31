@@ -35,6 +35,9 @@ def _start_server_background(args: argparse.Namespace) -> bool:
 
 def _run_start(args: argparse.Namespace):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    if _check_server(args.host, args.port):
+        print(f"Server already running at {args.host}:{args.port}.", file=sys.stderr)
+        sys.exit(1)
     from deckard.server import DeckardServer
     srv = DeckardServer(
         host=args.host,
