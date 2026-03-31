@@ -25,6 +25,9 @@ classifiers = [
 ]
 dependencies = ["textual>=1.0"]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 deckard = "deckard.__main__:main"
 
