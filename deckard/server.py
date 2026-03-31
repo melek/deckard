@@ -466,24 +466,30 @@ class _Handler(BaseHTTPRequestHandler):
     def _mark_delivered(self, srv: "DeckardServer", req_id: str) -> None:
         entry = srv.queue.get(req_id)
         if entry and entry.request.responded_at:
-            _complete_request(
-                srv.db,
-                srv.db_lock,
-                req_id,
-                entry.request.response or "",
-                entry.request.responded_at,
-                entry.duration_ms,
-                entry.reading_ms,
-                entry.composing_ms,
-            )
+            try:
+                _complete_request(
+                    srv.db,
+                    srv.db_lock,
+                    req_id,
+                    entry.request.response or "",
+                    entry.request.responded_at,
+                    entry.duration_ms,
+                    entry.reading_ms,
+                    entry.composing_ms,
+                )
+            except sqlite3.ProgrammingError:
+                pass  # DB closed during shutdown — response was already delivered
 
     def _mark_delivery_failed(self, srv: "DeckardServer", req_id: str) -> None:
         entry = srv.queue.get(req_id)
         if entry:
-            _fail_request(
-                srv.db, srv.db_lock, req_id,
-                entry.request.response, entry.request.responded_at,
-            )
+            try:
+                _fail_request(
+                    srv.db, srv.db_lock, req_id,
+                    entry.request.response, entry.request.responded_at,
+                )
+            except sqlite3.ProgrammingError:
+                pass  # DB closed during shutdown
 
     # ---- internal TUI endpoints ----
 
