@@ -10,10 +10,13 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -222,6 +225,10 @@ class DeckardClient(App):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Show detail and input when a request is selected."""
+        # Don't switch requests while composing a response (CA-4.2 guard)
+        if self._selected_id is not None:
+            return
+
         idx = event.list_view.index
         if idx is None or idx >= len(self._queue_items):
             return
