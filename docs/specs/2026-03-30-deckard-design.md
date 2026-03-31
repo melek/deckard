@@ -86,7 +86,7 @@ Prefixed with `/_deckard/` to separate from the public OpenAI API.
 
 **`GET /_deckard/queue`** — Returns pending and abandoned requests as JSON array. TUI polls this.
 
-**`POST /_deckard/queue/{id}/respond`** — TUI submits human's response. Body: `{"response": "..."}`. Sets the `threading.Event`, unblocks the waiting HTTP handler. Returns 200 on success, 404 if request ID not found, 409 if already completed.
+**`POST /_deckard/queue/{id}/respond`** — TUI submits human's response. Body: `{"response": "...", "reading_ms": N, "composing_ms": N}`. Sets the `threading.Event`, unblocks the waiting HTTP handler. Returns 200 on success, 404 if request ID not found, 409 if already completed, 400 if malformed JSON.
 
 ### SSE Streaming
 
@@ -117,6 +117,7 @@ Delay: 2ms floor between chunks (protocol correctness). `--simulate-latency` inc
 - TUI submits response → server sets event → handler wakes, streams/returns
 - No lock/claim mechanism — single TUI, single queue
 - On shutdown (SIGTERM/SIGINT): pending and in_progress requests marked `abandoned` in SQLite
+- `completed` status written to SQLite only after response is fully delivered to the client socket. If socket write fails, response is preserved in the record but status reflects delivery failure. The in-memory Event unblocks the handler immediately; the durable record reflects ground truth.
 
 ### SQLite Logging
 
@@ -195,12 +196,11 @@ Full message content displayed — nothing hidden. The visual structure helps th
 | `Enter` | Select request — shows detail + opens response input |
 | `Ctrl+Enter` | Submit response |
 | `Esc` | Back to request list from detail/input view |
-| `e` | Open `$EDITOR` for long responses (git-commit pattern) |
 | `q` | Quit TUI |
 
 ### Abandoned Request Recovery
 
-On startup, the TUI checks for requests with status `abandoned`. These appear at the top of the request list with a `↻` indicator. The human can respond to them normally or leave them (they'll be abandoned again on next shutdown).
+On startup, the TUI checks for requests with status `abandoned`. These appear at the top of the request list with a `↻` indicator and a "no client waiting" note (the original HTTP connection is gone). The human can respond for the record (logged but not delivered) or leave them.
 
 ### Duration Tracking
 
@@ -308,6 +308,12 @@ testpaths = ["tests"]
 ```
 
 ---
+
+## Future Work (v0.2)
+
+- `$EDITOR` integration: `e` opens `$EDITOR` with prompt as comments, blank section for response (git-commit pattern). Deferred — TextArea handles multi-line editing for v0.1.
+- Anthropic `/v1/messages` endpoint (currently 501 stub)
+- Adaptive polling (500ms burst after new request, 2s steady state)
 
 ## What This Is Not
 
