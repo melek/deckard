@@ -571,7 +571,11 @@ class DeckardServer(_ThreadedHTTPServer):
         self.serve_forever()
 
     def shutdown(self) -> None:
-        """Graceful shutdown: abandon pending, close DB, stop serving."""
+        """Graceful shutdown: abandon pending, close DB, stop serving. Idempotent."""
+        if getattr(self, "_shutdown_called", False):
+            return
+        self._shutdown_called = True
+
         # Unblock any waiting handlers
         abandoned = self.queue.abandon_all()
 
